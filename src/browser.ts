@@ -49,16 +49,15 @@ const suitOrder = new Map<Card['suit'], number>([
 	['S', 3]
 ])
 
+type PanelTab = 'now' | 'deal' | 'match' | 'room'
+
 let view: BoardView | undefined
-let selectedLevel = 1
-let selectedStrain: Strain | undefined
 let errorMessage = ''
 let claimConflictSide: PlayerRole | undefined
 let eventSource: EventSource | undefined
 let analysis: BoardAnalysis | undefined
 let analysisRevision: number | undefined
 let analysisVisible = false
-let auctionVisible = false
 let tricksVisible = false
 let statsVisible = false
 let boardHistoryVisible = false
@@ -88,8 +87,11 @@ let tableMessagesVisible = false
 let claimNoteDraft = ''
 let selectedAlertIndex: number | undefined
 let alertExplanationDraft = ''
+let selectedCallIndex: number | undefined
 let selectedAlertQuestionIndex: number | undefined
 let alertQuestionDraft = ''
+let activePanelTab: PanelTab = 'now'
+let lastNowPhase: BoardView['phase'] | undefined
 const alertAnswerDrafts = new Map<string, string>()
 const bidPreviewCache = new Map<string, string>()
 
@@ -293,7 +295,6 @@ async function resumeRoom(roomId: string, token: string): Promise<void> {
 		const payload = await requestJson<BoardView>(`/api/rooms/${roomId}/view?token=${encodeURIComponent(token)}`)
 		if (view?.roomId !== payload.roomId) roomNameDraft = undefined
 		view = payload
-		syncBidSelection(payload)
 		selectedReviewTrick = clampReviewTrickIndex(payload, selectedReviewTrick)
 		connect(roomId, token)
 	} catch (error) {
@@ -341,7 +342,6 @@ function connect(roomId: string, token: string): void {
 		view = payload
 		connectionStatus = 'connected'
 		switchConflictSide = undefined
-		syncBidSelection(payload)
 		selectedReviewTrick = clampReviewTrickIndex(payload, selectedReviewTrick)
 		errorMessage = ''
 		render()
@@ -1146,18 +1146,6 @@ async function refreshSelectedBidPreview(state: BoardView, call: Call, button?: 
 	}
 }
 
-function syncBidSelection(state: BoardView): void {
-	if (state.phase !== 'auction') return
-	const bid = [...state.auction].reverse().find(entry => entry.call.type === 'bid')
-	if (bid?.call.type === 'bid') {
-		selectedLevel = bid.call.level
-		selectedStrain = bid.call.strain
-		return
-	}
-	selectedLevel = 1
-	selectedStrain = undefined
-}
-
 function strainLabel(strain: Strain): string {
 	return strain === 'NT' ? strain : suitSymbols[strain]
 }
@@ -1341,6 +1329,16 @@ function agreementTooltip(state: BoardView): string {
 	return lines.join('\n')
 }
 
+/* The full seat-by-seat readout is a tooltip; the heading gets the count. */
+function connectionSummary(state: BoardView): string {
+	const seated = seats.filter(seat => state.connections[seat]).length
+	const sides = (state.connections.NS ? 1 : 0) + (state.connections.EW ? 1 : 0)
+	const parts = [`${seated + sides === 0 ? 'No one' : `${seated} of 4`} connected`]
+	if (sides) parts.push(`${sides} side ${sides === 1 ? 'control' : 'controls'}`)
+	if (state.connections.spectators) parts.push(`${state.connections.spectators} watching`)
+	return parts.join(' · ')
+}
+
 function connectionText(state: BoardView): string {
 	return `Connected seats: N ${state.connections.N ? 'yes' : 'no'}, E ${state.connections.E ? 'yes' : 'no'}, S ${state.connections.S ? 'yes' : 'no'}, W ${state.connections.W ? 'yes' : 'no'}. Full-side controls: NS ${state.connections.NS ? 'yes' : 'no'}, EW ${state.connections.EW ? 'yes' : 'no'}. Spectators ${state.connections.spectators}.`
 }
@@ -1428,23 +1426,35 @@ function makeButton(label: string, className = ''): HTMLButtonElement {
 	return button
 }
 
+/* A real card: corner index you can read when the hand is fanned, and a
+   large pip so the suit reads at a glance on the fully exposed card. */
 function appendCardFace(parent: HTMLElement, card: Card): void {
 	const face = document.createElement('span')
 	face.className = 'card-face'
+	const index = document.createElement('span')
+	index.className = 'card-index'
 	const rank = document.createElement('span')
 	rank.className = `card-rank ${card.rank === 'T' ? 'ten-rank' : ''}`
 	rank.textContent = rankLabel(card.rank)
 	const suit = document.createElement('span')
 	suit.className = 'card-suit'
 	suit.textContent = suitSymbols[card.suit]
-	face.append(rank, suit)
+	index.append(rank, suit)
+	const pip = document.createElement('span')
+	pip.className = 'card-pip'
+	pip.textContent = suitSymbols[card.suit]
+	pip.setAttribute('aria-hidden', 'true')
+	face.append(index, pip)
 	parent.append(face)
 }
 
 function renderCard(state: BoardView, seat: Seat, card: Card): HTMLButtonElement {
 	const legal = !reviewMode && canActNow(state) && state.currentTurn === seat && state.legalPlays.includes(cardId(card))
 	const best = isDdsBestPlay(state, seat, card)
-	const button = makeButton('', `card-button ${isRed(card) ? 'red' : ''} ${legal ? 'legal' : ''} ${best ? 'dds-best' : ''}`)
+	/* Only grey a card when it is this seat's turn and the card cannot be
+	   played — that is the follow-suit cue. Never grey a hand at rest. */
+	const barred = state.phase === 'play' && state.currentTurn === seat && !reviewMode && !legal
+	const button = makeButton('', `card-button ${isRed(card) ? 'red' : ''} ${legal ? 'legal' : ''} ${barred ? 'barred' : ''} ${best ? 'dds-best' : ''}`)
 	appendCardFace(button, card)
 	button.disabled = !legal
 	button.title = cardTitle(state, seat, card, legal, best)
@@ -1561,7 +1571,11 @@ function renderCenter(state: BoardView): HTMLElement {
 		? `Review trick ${reviewed.number}${reviewed.complete ? '' : ' current'}`
 		: lastCompleted
 			? `Last trick ${state.completedTricks.length}`
-		: state.phase
+		/* "Auction / auction" said nothing twice; show the standing bid.
+		   In other phases the bare phase name repeats the line above it. */
+		: state.phase === 'auction'
+			? currentContractText(state)
+		: ''
 	contract.innerHTML = `<strong>${contractLabel(state)}</strong><span class="muted">${subtitle}</span>`
 
 	if (reviewed) {
@@ -1596,7 +1610,8 @@ function renderCenter(state: BoardView): HTMLElement {
 	if (!reviewed && state.phase === 'play') {
 		const playSummary = document.createElement('div')
 		playSummary.className = 'play-summary'
-		const rows = [playStatusText(state), tableRoleText(state), currentTrickText(state)].filter(Boolean)
+		/* Whose turn it is is stated once, in the panel head. */
+		const rows = [tableRoleText(state), currentTrickText(state)].filter(Boolean)
 		for (const rowText of rows) {
 			const row = document.createElement('div')
 			row.textContent = rowText
@@ -1790,7 +1805,9 @@ function renderMatchResults(state: BoardView): HTMLElement {
 	return section
 }
 
-function renderSessionControls(state: BoardView): HTMLElement {
+/* Playing a board and administering the room are different jobs, so they
+   live in different groups. This one is only the room's own settings. */
+function renderRoomAdmin(state: BoardView): HTMLElement {
 	const section = document.createElement('section')
 	section.className = 'section session-panel'
 	const header = document.createElement('div')
@@ -1820,8 +1837,6 @@ function renderSessionControls(state: BoardView): HTMLElement {
 	saveName.title = 'Save this friendly room name.'
 	saveName.addEventListener('click', () => void renameRoom())
 	nameForm.append(nameLabel, saveName)
-
-	const systemForm = renderBiddingSystemControl(state)
 
 	const sides = document.createElement('div')
 	sides.className = 'side-choice'
@@ -1875,10 +1890,10 @@ function renderSessionControls(state: BoardView): HTMLElement {
 		const note = document.createElement('p')
 		note.className = 'muted session-note'
 		note.textContent = 'Spectator mode is watch-only. Switch to a seat to bid, play, deal, import, or undo.'
-		section.append(header, nameForm, systemForm, renderTricks(state))
+		section.append(header, nameForm)
 		section.append(sides, tableControls, conflict, roomActions, note)
 	} else {
-		section.append(header, nameForm, systemForm, renderTricks(state))
+		section.append(header, nameForm)
 		section.append(sides, tableControls, conflict, roomActions)
 	}
 
@@ -2041,7 +2056,8 @@ function renderAgreementPanel(state: BoardView): HTMLElement {
 	title.textContent = 'Table'
 	const status = document.createElement('span')
 	status.className = 'muted table-status'
-	status.textContent = connectionText(state)
+	status.textContent = connectionSummary(state)
+	status.title = connectionText(state)
 	const messagesToggle = makeButton(tableMessagesVisible ? 'Hide' : 'Show')
 	messagesToggle.title = tableMessagesVisible ? 'Hide table messages.' : tableMessagesTooltip(state)
 	messagesToggle.addEventListener('click', () => {
@@ -2173,99 +2189,70 @@ function renderAuctionControls(state: BoardView): HTMLElement {
 	section.className = 'section auction-controls'
 	const ownsTurn = state.phase === 'auction' && controlsSeat(state.controlledSide, state.currentTurn) && !state.pendingAgreement
 
-	const summary = document.createElement('div')
-	summary.className = 'auction-summary'
-	const contract = document.createElement('div')
-	contract.className = 'auction-summary-row'
-	contract.innerHTML = `<span>Current contract</span><strong>${currentContractText(state)}</strong>`
-	const turn = document.createElement('div')
-	turn.className = `auction-summary-row ${ownsTurn ? 'turn-active' : ''}`
-	turn.innerHTML = `<span>Turn</span><strong>${auctionTurnText(state, ownsTurn)}</strong>`
-	summary.append(contract, turn)
-
+	/* Whose turn and what the contract stands at are stated once, in the
+	   panel head. Here we only carry what the bid buttons need for context. */
 	const context = document.createElement('div')
 	context.className = 'auction-context'
 	const currentLabel = document.createElement('span')
-	currentLabel.textContent = `Current bid: ${currentBidLabel(state)}`
+	currentLabel.textContent = `Standing bid: ${currentBidLabel(state)}`
 	const lastLabel = document.createElement('strong')
-	lastLabel.textContent = `Turn: ${state.currentTurn}  Last call: ${lastCallLabel(state)}`
+	lastLabel.textContent = `Last call: ${lastCallLabel(state)}`
 	context.append(currentLabel, lastLabel)
 
-	const bidControls = document.createElement('div')
-	bidControls.className = 'bid-controls'
-
-	const level = document.createElement('select')
-	for (let value = 1; value <= 7; value++) {
-		const option = document.createElement('option')
-		option.value = String(value)
-		option.textContent = String(value)
-		option.selected = value === selectedLevel
-		level.append(option)
-	}
-	level.disabled = !ownsTurn
-	level.addEventListener('change', () => {
-		selectedLevel = Number(level.value) as typeof selectedLevel
-		errorMessage = ''
-		render()
-	})
-
-	const strain = document.createElement('select')
-	const placeholder = document.createElement('option')
-	placeholder.value = ''
-	placeholder.textContent = `${suitSymbols.C} / ${suitSymbols.D} / ${suitSymbols.H} / ${suitSymbols.S} / NT`
-	placeholder.selected = selectedStrain === undefined
-	strain.append(placeholder)
-	for (const value of strains) {
-		const option = document.createElement('option')
-		option.value = value
-		option.textContent = value === 'NT' ? value : suitSymbols[value]
-		option.selected = value === selectedStrain
-		strain.append(option)
-	}
-	strain.disabled = !ownsTurn
-	strain.addEventListener('change', () => {
-		selectedStrain = strain.value ? strain.value as Strain : undefined
-		errorMessage = ''
-		render()
-	})
-
-	const bidButton = makeButton('Bid')
-	bidButton.disabled = !ownsTurn || selectedStrain === undefined
-	const selectedBidCall: Call | undefined = selectedStrain
-		? { type: 'bid', level: selectedLevel as 1 | 2 | 3 | 4 | 5 | 6 | 7, strain: selectedStrain }
-		: undefined
-	bidButton.title = selectedBidCall ? selectedBidTitle(state, selectedBidCall, ownsTurn) : ownsTurn ? 'Choose a suit or NT first.' : auctionTurnText(state, ownsTurn)
-	if (selectedBidCall && ownsTurn && state.legalCalls.includes(callId(selectedBidCall))) {
-		void refreshSelectedBidPreview(state, selectedBidCall, bidButton)
-		bidButton.addEventListener('pointerenter', () => void refreshSelectedBidPreview(state, selectedBidCall, bidButton))
-		bidButton.addEventListener('focus', () => void refreshSelectedBidPreview(state, selectedBidCall, bidButton))
-	}
-	bidButton.addEventListener('click', () => {
-		if (!selectedStrain) {
-			errorMessage = 'Choose a suit or NT first.'
-			render()
-			return
+	/* A bidding box, the way it sits on a real table: every call laid out
+	   in the grid, one click to make it, illegal calls left in the box. */
+	const box = document.createElement('div')
+	box.className = 'bidding-box'
+	const ladder = document.createElement('div')
+	ladder.className = 'bid-ladder'
+	for (let level = 1 as 1 | 2 | 3 | 4 | 5 | 6 | 7; level <= 7; level++) {
+		for (const strain of strains) {
+			const call: Call = { type: 'bid', level, strain }
+			const legal = state.legalCalls.includes(callId(call))
+			const button = document.createElement('button')
+			button.type = 'button'
+			button.className = `bid-card ${strain === 'H' || strain === 'D' ? 'red' : ''} ${strain === 'NT' ? 'notrump' : ''}`
+			const number = document.createElement('span')
+			number.className = 'bid-level'
+			number.textContent = String(level)
+			const mark = document.createElement('span')
+			mark.className = 'bid-strain'
+			mark.textContent = strainLabel(strain)
+			button.append(number, mark)
+			button.disabled = !ownsTurn || !legal
+			button.setAttribute('aria-label', `Bid ${level} ${strain === 'NT' ? 'no trump' : strain}`)
+			button.title = ownsTurn && legal ? selectedBidTitle(state, call, ownsTurn) : auctionActionTitle(state, call, legal)
+			if (ownsTurn && legal) {
+				const preview = (): void => void refreshSelectedBidPreview(state, call, button)
+				button.addEventListener('pointerenter', preview)
+				button.addEventListener('focus', preview)
+			}
+			button.addEventListener('click', () => void submitAction({ type: 'call', call }))
+			ladder.append(button)
 		}
-		const bidCall: Call = { type: 'bid', level: selectedLevel as 1 | 2 | 3 | 4 | 5 | 6 | 7, strain: selectedStrain }
-		if (!state.legalCalls.includes(callId(bidCall))) {
-			errorMessage = illegalBidMessage(state, bidCall)
-			render()
-			return
-		}
-		void submitAction({ type: 'call', call: bidCall })
-	})
-	bidControls.append(level, strain, bidButton)
+	}
+	box.append(ladder)
 
 	const callButtons = document.createElement('div')
 	callButtons.className = 'call-buttons'
-	for (const call of [{ type: 'pass' }, { type: 'double' }, { type: 'redouble' }] as const) {
-		const button = makeButton(callLabel(call))
+	/* Pass green, double red, redouble blue — the bidding box's own colours. */
+	const otherCalls = [
+		{ call: { type: 'pass' } as const, tone: 'pass' },
+		{ call: { type: 'double' } as const, tone: 'double' },
+		{ call: { type: 'redouble' } as const, tone: 'redouble' }
+	]
+	for (const { call, tone } of otherCalls) {
+		const button = document.createElement('button')
+		button.type = 'button'
+		button.className = `bid-call bid-call-${tone}`
+		button.textContent = callLabel(call)
 		const legal = state.legalCalls.includes(callId(call))
 		button.disabled = !ownsTurn || !legal
 		button.title = state.pendingAgreement ? 'Answer the pending table request first.' : auctionActionTitle(state, call, legal)
 		button.addEventListener('click', () => void submitAction({ type: 'call', call }))
 		callButtons.append(button)
 	}
+	box.append(callButtons)
 
 	const inlineError = document.createElement('div')
 	inlineError.className = 'error auction-error'
@@ -2284,7 +2271,7 @@ function renderAuctionControls(state: BoardView): HTMLElement {
 		rescue.append(note, button)
 	}
 
-	section.append(summary, context, bidControls, callButtons, renderLatestAlertPrompt(state), rescue, inlineError)
+	section.append(context, box, renderLatestAlertPrompt(state), rescue, inlineError)
 	return section
 }
 
@@ -2343,82 +2330,86 @@ function renderAuctionHistory(state: BoardView): HTMLElement {
 	const title = document.createElement('h2')
 	title.className = 'title'
 	title.textContent = 'Auction'
-	const visibility = makeButton(auctionVisible ? 'Hide' : 'Show')
-	visibility.title = auctionVisible ? 'Hide auction.' : auctionTooltip(state)
-	visibility.addEventListener('click', () => {
-		auctionVisible = !auctionVisible
-		render()
-	})
-	header.append(title, visibility)
+	const summary = document.createElement('span')
+	summary.className = 'muted auction-summary-note'
+	summary.textContent = state.auction.length
+		? `${state.auction.length} call${state.auction.length === 1 ? '' : 's'}`
+		: `${state.dealer} deals`
+	summary.title = auctionTooltip(state)
+	header.append(title, summary)
 	section.append(header)
-	if (!auctionVisible) {
-		if (!state.auction.length) {
-			const collapsed = document.createElement('p')
-			collapsed.className = 'muted'
-			collapsed.textContent = 'No calls yet.'
-			section.append(collapsed)
-			return section
-		}
-		const lastIndex = state.auction.length - 1
-		const last = state.auction[lastIndex]!
-		const row = document.createElement('div')
-		row.className = `call-row auction-call-row latest-call ${last.alert ? 'alerted-call' : ''}`
-		row.title = auctionCallTitle(state, last)
-		const seat = document.createElement('span')
-		seat.textContent = last.seat
-		const call = document.createElement('strong')
-		call.textContent = callLabel(last.call)
-		const label = document.createElement('small')
-		label.className = 'auction-alert'
-		label.textContent = 'Last bid'
-		row.append(seat, call, label)
-		section.append(row)
-		return section
+	/* The auction as bridge writes it: one column per seat, clockwise from
+	   North, the dealer's column first filled. Reading down a column shows
+	   what one partnership did; reading across shows the bidding in order. */
+	const grid = document.createElement('div')
+	grid.className = 'auction-grid'
+	for (const seat of seats) {
+		const head = document.createElement('span')
+		head.className = `auction-col ${seat === state.dealer ? 'dealer-col' : ''}`
+		head.textContent = seat
+		head.title = seat === state.dealer ? `${seat} dealt this board.` : `${seat}'s calls.`
+		grid.append(head)
 	}
-	const list = document.createElement('div')
-	list.className = 'history-list'
-	if (!state.auction.length) {
-		const empty = document.createElement('p')
-		empty.className = 'muted'
-		empty.textContent = 'No calls yet.'
-		list.append(empty)
+	const offset = seats.indexOf(state.dealer)
+	for (let slot = 0; slot < offset; slot++) {
+		const blank = document.createElement('span')
+		blank.className = 'auction-cell blank'
+		blank.textContent = '\u2014'
+		grid.append(blank)
 	}
-	state.auction.map((entry, index) => ({ entry, index })).reverse().forEach(({ entry, index }) => {
-		const row = document.createElement('div')
-		row.className = `call-row auction-call-row ${index === state.auction.length - 1 ? 'latest-call' : ''} ${entry.alert ? 'alerted-call' : ''}`
-		row.title = auctionCallTitle(state, entry)
-		const seat = document.createElement('span')
-		seat.textContent = entry.seat
-		const call = document.createElement('strong')
-		call.textContent = callLabel(entry.call)
-		row.append(seat, call)
-		if (entry.alert?.explanation) {
-			const alert = document.createElement('small')
-			alert.className = 'auction-alert'
-			alert.textContent = entry.alert.explanation
-			alert.title = `Explained by ${entry.alert.explainedBy}: ${entry.alert.explanation}`
-			row.append(alert)
-		} else {
-			const suggestion = alertSuggestionForCall(state, index)
-			if (suggestion) {
-				const suggested = document.createElement('small')
-				suggested.className = 'auction-alert suggested-alert'
-				suggested.textContent = suggestion.explanation
-				suggested.title = `${suggestion.label} from ${biddingSystemLabel(state.roomMeta?.biddingSystem ?? 'natural')}.`
-				row.append(suggested)
-			}
+	state.auction.forEach((entry, index) => {
+		const cell = document.createElement('button')
+		cell.type = 'button'
+		const bid = entry.call.type === 'bid' ? entry.call : undefined
+		const red = bid && (bid.strain === 'H' || bid.strain === 'D')
+		const last = index === state.auction.length - 1
+		cell.className = `auction-cell ${red ? 'red' : ''} ${last ? 'latest' : ''} ${selectedCallIndex === index ? 'chosen' : ''}`
+		cell.textContent = callLabel(entry.call)
+		cell.title = auctionCallTitle(state, entry)
+		if (entry.alert || alertSuggestionForCall(state, index)) {
+			const mark = document.createElement('span')
+			mark.className = `alert-dot ${entry.alert ? 'explained' : 'suggested'}`
+			mark.textContent = entry.alert ? '\u25CF' : '\u25CB'
+			cell.append(mark)
 		}
-		if (canExplainAuctionCall(state, entry)) {
-			const explain = makeButton(entry.alert ? 'Edit' : 'Alert')
-			explain.title = entry.alert ? 'Edit this call explanation.' : 'Add an alert/explanation for this call.'
+		cell.addEventListener('click', () => {
+			selectedCallIndex = selectedCallIndex === index ? undefined : index
+			selectedAlertIndex = undefined
+			selectedAlertQuestionIndex = undefined
+			render()
+		})
+		grid.append(cell)
+	})
+	if (state.phase === 'auction' && state.auction.length) {
+		const waiting = document.createElement('span')
+		waiting.className = 'auction-cell awaiting'
+		waiting.textContent = '?'
+		waiting.title = `${state.currentTurn} is to call.`
+		grid.append(waiting)
+	}
+	section.append(grid)
+
+	const chosen = selectedCallIndex !== undefined ? state.auction[selectedCallIndex] : undefined
+	if (chosen && selectedCallIndex !== undefined) {
+		const index = selectedCallIndex
+		const detail = document.createElement('div')
+		detail.className = 'auction-detail'
+		const heading = document.createElement('div')
+		heading.className = 'auction-detail-head'
+		const who = document.createElement('strong')
+		who.textContent = `${chosen.seat} ${callLabel(chosen.call)}`
+		heading.append(who)
+		if (canExplainAuctionCall(state, chosen)) {
+			const explain = makeButton(chosen.alert ? 'Edit' : 'Alert')
+			explain.title = chosen.alert ? 'Edit this call explanation.' : 'Add an alert/explanation for this call.'
 			explain.addEventListener('click', () => {
 				selectedAlertIndex = selectedAlertIndex === index ? undefined : index
-				alertExplanationDraft = entry.alert?.explanation ?? alertSuggestionForCall(state, index)?.explanation ?? ''
+				alertExplanationDraft = chosen.alert?.explanation ?? alertSuggestionForCall(state, index)?.explanation ?? ''
 				render()
 			})
-			row.append(explain)
+			heading.append(explain)
 		}
-		if (canAskAlertQuestion(state, entry)) {
+		if (canAskAlertQuestion(state, chosen)) {
 			const ask = makeButton('Ask')
 			ask.title = 'Ask a follow-up question about this explanation.'
 			ask.addEventListener('click', () => {
@@ -2426,18 +2417,32 @@ function renderAuctionHistory(state: BoardView): HTMLElement {
 				alertQuestionDraft = ''
 				render()
 			})
-			row.append(ask)
+			heading.append(ask)
 		}
-		list.append(row)
-		if (entry.alert) list.append(renderAlertThread(state, entry, index))
-		if (selectedAlertIndex === index && canExplainAuctionCall(state, entry)) {
-			list.append(renderAlertEditor(state, entry, index))
+		detail.append(heading)
+		if (!chosen.alert) {
+			const suggestion = alertSuggestionForCall(state, index)
+			const note = document.createElement('p')
+			note.className = 'muted'
+			note.textContent = suggestion
+				? `${suggestion.explanation} — suggested by ${biddingSystemLabel(state.roomMeta?.biddingSystem ?? 'natural')}, not yet agreed at the table.`
+				: 'No explanation on this call.'
+			detail.append(note)
 		}
-		if (selectedAlertQuestionIndex === index && canAskAlertQuestion(state, entry)) {
-			list.append(renderAlertQuestionEditor(index))
+		section.append(detail)
+		if (chosen.alert) section.append(renderAlertThread(state, chosen, index))
+		if (selectedAlertIndex === index && canExplainAuctionCall(state, chosen)) {
+			section.append(renderAlertEditor(state, chosen, index))
 		}
-	})
-	section.append(list)
+		if (selectedAlertQuestionIndex === index && canAskAlertQuestion(state, chosen)) {
+			section.append(renderAlertQuestionEditor(index))
+		}
+	} else if (state.auction.length) {
+		const hint = document.createElement('p')
+		hint.className = 'muted auction-hint'
+		hint.textContent = 'Pick a call to read or add its explanation.'
+		section.append(hint)
+	}
 	return section
 }
 
@@ -2568,6 +2573,69 @@ function auctionTooltip(state: BoardView): string {
 	}).join('\n')
 }
 
+/* Tricks the way declarer counts them: what the contract needs, what each
+   side has taken, and a slot per trick so the shape of the hand is visible. */
+function renderTrickCounter(state: BoardView): HTMLElement {
+	const wrap = document.createElement('div')
+	wrap.className = 'trick-counter'
+	const declarerSide = state.contract ? partnership(state.contract.declarer) : undefined
+	const target = state.contract ? state.contract.level + 6 : undefined
+
+	const scores = document.createElement('div')
+	scores.className = 'trick-scores'
+	for (const side of ['NS', 'EW'] as const) {
+		const won = state.tricksWon[side]
+		const box = document.createElement('div')
+		box.className = `trick-score ${declarerSide === side ? 'declaring' : ''}`
+		const label = document.createElement('span')
+		label.className = 'trick-score-label'
+		label.textContent = declarerSide === side ? `${side} · declaring` : declarerSide ? `${side} · defending` : side
+		const value = document.createElement('strong')
+		value.textContent = String(won)
+		box.append(label, value)
+		if (declarerSide && target !== undefined) {
+			const need = document.createElement('span')
+			need.className = 'trick-need'
+			if (side === declarerSide) {
+				const remaining = target - won
+				need.textContent = remaining > 0 ? `${remaining} more to make ${state.contract!.level}` : `contract made, +${won - target}`
+			} else {
+				const remaining = 14 - target - won
+				need.textContent = remaining > 0 ? `${remaining} more to set it` : 'contract defeated'
+			}
+			box.append(need)
+		}
+		scores.append(box)
+	}
+	wrap.append(scores)
+
+	const ladder = document.createElement('div')
+	ladder.className = 'trick-ladder'
+	ladder.setAttribute('aria-label', 'Tricks played, in order')
+	for (let number = 1; number <= 13; number++) {
+		const trick = state.completedTricks[number - 1]
+		const pip = document.createElement('button')
+		pip.type = 'button'
+		const winnerSide = trick?.winner ? partnership(trick.winner) : undefined
+		pip.className = `trick-pip ${winnerSide ? `won-${winnerSide.toLowerCase()}` : 'unplayed'} ${reviewMode && selectedReviewTrick === number - 1 ? 'reviewing' : ''}`
+		pip.textContent = String(number)
+		pip.disabled = !trick
+		pip.title = trick
+			? `Trick ${number}: ${trick.plays.map(play => `${play.seat} ${formatCard(play.card)}`).join(', ')} — won by ${trick.winner}. Click to review.`
+			: `Trick ${number} has not been played.`
+		if (trick) {
+			pip.addEventListener('click', () => {
+				reviewMode = true
+				selectedReviewTrick = number - 1
+				render()
+			})
+		}
+		ladder.append(pip)
+	}
+	wrap.append(ladder)
+	return wrap
+}
+
 function renderTricks(state: BoardView): HTMLElement {
 	const section = document.createElement('section')
 	section.className = 'section'
@@ -2576,7 +2644,7 @@ function renderTricks(state: BoardView): HTMLElement {
 	const title = document.createElement('h2')
 	title.className = 'title'
 	title.textContent = 'Tricks'
-	const visibility = makeButton(tricksVisible ? 'Hide' : 'Show')
+	const visibility = makeButton(tricksVisible ? 'Hide log' : 'Show log')
 	visibility.title = tricksTooltip(state)
 	visibility.addEventListener('click', () => {
 		tricksVisible = !tricksVisible
@@ -2584,13 +2652,12 @@ function renderTricks(state: BoardView): HTMLElement {
 	})
 	header.append(title, visibility)
 	section.append(header)
+	/* The counter is the point of this panel, so it is always on. The
+	   toggle only controls the card-by-card log underneath it. */
+	section.append(renderTrickCounter(state))
 	if (!tricksVisible) {
 		const lastPreview = renderLastTrickPreview(state)
 		if (lastPreview) section.append(lastPreview)
-		const collapsed = document.createElement('p')
-		collapsed.className = 'muted'
-		collapsed.textContent = state.completedTricks.length ? `${state.completedTricks.length} trick${state.completedTricks.length === 1 ? '' : 's'} hidden.` : 'No completed tricks.'
-		section.append(collapsed)
 		return section
 	}
 	const list = document.createElement('div')
@@ -3407,6 +3474,152 @@ function savedRoomMatches(room: SavedRoomSummary): boolean {
 	].some(value => value.toLowerCase().includes(query))
 }
 
+/* What the Play/Scoring group needs: the tricks so far, and — for a
+   spectator — why the controls are inert. */
+function renderPlayPanel(state: BoardView): HTMLElement {
+	const wrap = document.createElement('div')
+	wrap.append(renderTricks(state))
+	if (state.controlledSide === 'SPECTATOR') {
+		const note = document.createElement('p')
+		note.className = 'muted session-note'
+		note.textContent = 'You are watching. Take a seat in Room to bid, play or deal.'
+		wrap.append(note)
+	}
+	return wrap
+}
+
+function nowTabLabel(state: BoardView): string {
+	if (state.phase === 'auction') return 'Bidding'
+	if (state.phase === 'play') return 'Play'
+	return 'Scoring'
+}
+
+/* The one line a player checks constantly: is it on me? */
+function turnLine(state: BoardView): { text: string, detail: string, isYou: boolean } {
+	if (state.phase === 'passed-out') return { text: 'Passed out', detail: 'No contract. Deal the next board.', isYou: false }
+	if (state.phase === 'complete') return { text: 'Board complete', detail: contractLabel(state), isYou: false }
+	const verb = state.phase === 'auction' ? 'bid' : 'play'
+	if (state.pendingAgreement) return { text: 'Table request waiting', detail: agreementText(state), isYou: false }
+	if (state.controlledSide === 'SPECTATOR') return { text: `${state.currentTurn} to ${verb}`, detail: 'You are watching this table.', isYou: false }
+	if (state.robots[state.currentTurn]) return { text: `${state.currentTurn} robot is playing`, detail: 'The robot takes this seat automatically.', isYou: false }
+	const yours = state.phase === 'auction'
+		? controlsSeat(state.controlledSide, state.currentTurn)
+		: canPlayCurrentSeat(state)
+	if (yours) return { text: `Your turn to ${verb}`, detail: tableRoleText(state) || `You are sitting ${state.currentTurn}.`, isYou: true }
+	return { text: `${state.currentTurn} to ${verb}`, detail: `Waiting for ${partnership(state.currentTurn)}.`, isYou: false }
+}
+
+function renderPanelHead(state: BoardView): HTMLElement {
+	const head = document.createElement('div')
+	head.className = 'panel-head'
+
+	const turn = turnLine(state)
+	const line = document.createElement('p')
+	line.className = `turn-line ${turn.isYou ? 'is-you' : ''}`
+	line.setAttribute('role', 'status')
+	line.textContent = turn.text
+	const detail = document.createElement('p')
+	detail.className = 'turn-detail'
+	detail.textContent = turn.detail
+	head.append(line, detail)
+
+	const vulnerable = state.vulnerability !== 'none'
+	const meta = document.createElement('div')
+	meta.className = 'head-meta'
+	const facts: [string, string, boolean][] = [
+		['Board', String(state.boardNumber), false],
+		state.phase === 'auction'
+			? ['Bid', currentBidLabel(state), false]
+			: ['Contract', contractLabel(state), false],
+		['Dealer', state.dealer, false],
+		['Vul', state.vulnerability.toUpperCase(), vulnerable],
+		['You', state.controlledSide === 'SPECTATOR' ? 'Spectator' : state.controlledSide, false]
+	]
+	/* Nobody has taken a trick during the auction; don't print 0-0. */
+	if (state.phase !== 'auction') {
+		facts.splice(4, 0, ['Tricks', `NS ${state.tricksWon.NS} · EW ${state.tricksWon.EW}`, false])
+	}
+	for (const [label, value, warn] of facts) {
+		const item = document.createElement('span')
+		if (warn) item.className = 'vuln-on'
+		item.append(`${label} `)
+		const strong = document.createElement('b')
+		strong.textContent = value
+		item.append(strong)
+		meta.append(item)
+	}
+	head.append(meta)
+
+	/* Status belongs beside the action that caused it, not below ten panels.
+	   The bidding box prints it under the bid buttons, so skip it there. */
+	const shownInBidBox = state.phase === 'auction' && activePanelTab === 'now'
+	const status = document.createElement('div')
+	status.className = 'error'
+	status.setAttribute('role', 'status')
+	status.textContent = shownInBidBox ? '' : errorMessage
+	head.append(status)
+
+	head.append(renderTabs(state))
+	return head
+}
+
+function renderTabs(state: BoardView): HTMLElement {
+	const strip = document.createElement('div')
+	strip.className = 'tabs'
+	strip.setAttribute('role', 'tablist')
+	strip.setAttribute('aria-label', 'Side panel groups')
+	const tabs: [PanelTab, string, boolean][] = [
+		['now', nowTabLabel(state), false],
+		['deal', 'Deal', Boolean(analysis)],
+		['match', 'Match', false],
+		['room', 'Room', false]
+	]
+	const select = (id: PanelTab): void => {
+		activePanelTab = id
+		render()
+		/* Keep focus on the strip so arrow keys keep working after a re-render. */
+		document.querySelector<HTMLButtonElement>(`.tab[data-tab="${id}"]`)?.focus()
+	}
+	tabs.forEach(([id, label, dot], index) => {
+		const button = document.createElement('button')
+		button.className = 'tab'
+		button.type = 'button'
+		button.dataset.tab = id
+		button.setAttribute('role', 'tab')
+		const selected = activePanelTab === id
+		button.setAttribute('aria-selected', String(selected))
+		/* Roving tabindex: one stop for the strip, arrows move within it. */
+		button.tabIndex = selected ? 0 : -1
+		button.textContent = label
+		button.title = panelTabHint(id, label)
+		if (dot && !selected) {
+			const mark = document.createElement('span')
+			mark.className = 'tab-dot'
+			button.append(mark)
+		}
+		button.addEventListener('click', () => select(id))
+		button.addEventListener('keydown', event => {
+			const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
+			if (step) {
+				event.preventDefault()
+				select(tabs[(index + step + tabs.length) % tabs.length]![0])
+			} else if (event.key === 'Home' || event.key === 'End') {
+				event.preventDefault()
+				select(tabs[event.key === 'Home' ? 0 : tabs.length - 1]![0])
+			}
+		})
+		strip.append(button)
+	})
+	return strip
+}
+
+function panelTabHint(id: PanelTab, label: string): string {
+	if (id === 'now') return `${label}: the controls for this stage of the deal.`
+	if (id === 'deal') return 'Deal: analysis, the auction record, tricks and board details.'
+	if (id === 'match') return 'Match: running results and finished boards.'
+	return 'Room: invite link, table setup, PBN files and backups.'
+}
+
 function render(): void {
 	if (!view) {
 		renderLobby()
@@ -3456,21 +3669,38 @@ function render(): void {
 	if (state.phase === 'auction') tableShell.append(renderAuctionHistory(state))
 	tableShell.append(table)
 
+	/* Follow the deal: a new phase pulls you back to the controls it needs. */
+	if (lastNowPhase !== state.phase) {
+		lastNowPhase = state.phase
+		activePanelTab = 'now'
+	}
+	/* A request needs an answer before anything else does. */
+	if (state.pendingAgreement) activePanelTab = 'now'
+
 	const sidePanel = document.createElement('aside')
 	sidePanel.className = 'side-panel'
-	const error = document.createElement('div')
-	error.className = 'error'
-	error.setAttribute('role', 'status')
-	error.textContent = state.phase === 'auction' ? '' : errorMessage
-	sidePanel.append(renderRoomLinks(state))
-	if (state.phase === 'auction' && state.auction.length === 0) sidePanel.append(renderSetupPanel(state))
-	if (state.phase === 'auction') sidePanel.append(renderAuctionControls(state))
-	else sidePanel.append(renderSessionControls(state))
-	sidePanel.append(renderAgreementPanel(state), renderDealForm(state))
-	sidePanel.append(renderPbnPanel(state), renderStats(state), renderMatchResults(state), renderBoardHistory(state))
-	if (state.phase !== 'auction') sidePanel.append(renderAuctionHistory(state))
-	sidePanel.append(renderAnalysis())
-	sidePanel.append(error)
+	sidePanel.append(renderPanelHead(state))
+
+	const body = document.createElement('div')
+	body.className = 'panel-body'
+	if (activePanelTab === 'now') {
+		if (state.phase === 'auction') body.append(renderAuctionControls(state))
+		else body.append(renderPlayPanel(state))
+		body.append(renderAgreementPanel(state))
+		/* A finished board is read, not played: put the score right here. */
+		if (state.phase === 'complete' || state.phase === 'passed-out') body.append(renderMatchResults(state))
+	} else if (activePanelTab === 'deal') {
+		body.append(renderAnalysis())
+		/* During the auction the record already sits above the table. */
+		if (state.phase !== 'auction') body.append(renderAuctionHistory(state))
+		body.append(renderStats(state))
+		body.append(renderDealForm(state))
+	} else if (activePanelTab === 'match') {
+		body.append(renderMatchResults(state), renderBoardHistory(state))
+	} else {
+		body.append(renderRoomLinks(state), renderSetupPanel(state), renderRoomAdmin(state), renderPbnPanel(state))
+	}
+	sidePanel.append(body)
 
 	appRoot.append(tableShell, sidePanel)
 }

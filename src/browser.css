@@ -5,6 +5,29 @@
 		sans-serif;
 	background: #16251e;
 	color: #f4f0e8;
+
+	/* Felt, chalk and gold: the table's own materials. */
+	--felt-900: #101d17;
+	--felt-800: #17281f;
+	--felt-700: #21382c;
+	--chalk: #f2ede1;
+	--chalk-dim: rgba(242, 237, 225, 0.62);
+	--gold: #f5c96a;
+	--claret: #d2544f;
+	--rule: rgba(255, 255, 255, 0.12);
+
+	/* The deck: warm stock, true card inks. */
+	--card-face: #fbfaf6;
+	--ink: #16191b;
+	--rouge: #c8102e;
+	--brass: #c9a961;
+	--card-w: 46px;
+	--card-h: 64px;
+
+	/* Condensed labels read like a score pad; data is tabular. */
+	--face-label: "Avenir Next Condensed", "Roboto Condensed", "Arial Narrow", ui-sans-serif, system-ui, sans-serif;
+	--face-data: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+	--face-card: "Helvetica Neue", Helvetica, Arial, ui-sans-serif, system-ui, sans-serif;
 }
 
 * {
@@ -38,6 +61,12 @@ button {
 button:disabled {
 	cursor: not-allowed;
 	opacity: 0.45;
+}
+
+/* Keyboard players need to see where they are. */
+:focus-visible {
+	outline: 2px solid #f5c96a;
+	outline-offset: 2px;
 }
 
 button:not(:disabled):hover,
@@ -319,30 +348,47 @@ button:not(:disabled):hover,
 		". south .";
 	grid-template-columns: minmax(92px, 1fr) minmax(220px, 1.4fr) minmax(92px, 1fr);
 	grid-template-rows: minmax(150px, auto) minmax(170px, auto) minmax(150px, auto);
-	gap: 12px;
+	gap: 10px;
 	align-items: stretch;
-	min-height: 620px;
+	min-height: 560px;
+	/* Lit from above the centre, falling off to the rail. */
+	border-radius: 16px;
+	padding: 14px;
+	background:
+		radial-gradient(115% 82% at 50% 34%, #24714f 0%, #17573e 42%, #0d3527 78%, #092a1f 100%);
+	box-shadow:
+		inset 0 0 0 1px rgba(201, 169, 97, 0.16),
+		inset 0 2px 40px rgba(0, 0, 0, 0.34),
+		inset 0 -30px 60px rgba(0, 0, 0, 0.3),
+		0 18px 44px -22px rgba(0, 0, 0, 0.8);
 }
 
 .seat {
 	min-width: 0;
-	border: 1px solid rgba(255, 255, 255, 0.13);
-	border-radius: 8px;
-	background: rgba(8, 19, 15, 0.34);
-	padding: 10px;
+	/* Hug the cards: a place at the table, not a container. */
+	align-self: center;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	border: 1px solid transparent;
+	border-radius: 10px;
+	background: rgba(6, 24, 17, 0.2);
+	padding: 8px 10px 10px;
+	transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
 
 .seat.current {
-	border-color: #f5c96a;
-	box-shadow: 0 0 0 1px rgba(245, 201, 106, 0.4);
+	border-color: rgba(245, 201, 106, 0.75);
+	background: rgba(10, 40, 28, 0.4);
+	box-shadow: 0 0 0 1px rgba(245, 201, 106, 0.28), 0 0 22px -6px rgba(245, 201, 106, 0.4);
 }
 
 .seat.waiting-turn {
-	border-color: rgba(245, 201, 106, 0.34);
+	border-color: rgba(245, 201, 106, 0.28);
 }
 
 .seat.playable-seat {
-	background: rgba(28, 88, 66, 0.46);
+	background: rgba(16, 58, 41, 0.5);
 }
 
 .seat.north {
@@ -376,109 +422,205 @@ button:not(:disabled):hover,
 	margin-bottom: 10px;
 }
 
+/* Section titles are labels, not headlines — only the turn line shouts. */
+.side-panel .section > .title,
+.side-panel .section-heading > .title {
+	font-family: var(--face-label);
+	font-size: 13px;
+	font-weight: 600;
+	letter-spacing: 0.09em;
+	text-transform: uppercase;
+	color: var(--chalk-dim);
+}
+
+.seat-header {
+	flex: none;
+}
+
 .seat-name {
-	font-weight: 800;
+	font-family: var(--face-label);
+	font-size: 16px;
+	font-weight: 700;
+	letter-spacing: 0.1em;
+	color: var(--chalk);
+}
+
+.seat.current .seat-name {
+	color: var(--gold);
 }
 
 .badge {
 	border-radius: 999px;
-	padding: 3px 8px;
-	background: rgba(255, 255, 255, 0.12);
-	color: #fff8df;
-	font-size: 12px;
+	padding: 3px 9px;
+	background: rgba(0, 0, 0, 0.28);
+	box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+	color: rgba(255, 248, 223, 0.82);
+	font-family: var(--face-label);
+	font-size: 11.5px;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
 	white-space: nowrap;
 }
 
+/* Hands fan and overlap the way they do in your actual hand: every card's
+   corner index stays readable, the one you point at lifts clear. */
 .hand {
 	display: flex;
-	flex-wrap: wrap;
-	gap: 6px;
-	margin-top: 10px;
-	min-height: 76px;
-	align-content: flex-start;
+	flex-wrap: nowrap;
+	justify-content: center;
+	margin-top: 8px;
+	padding-top: 14px;
+	min-height: calc(var(--card-h) + 14px);
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+
+.hand::-webkit-scrollbar {
+	display: none;
 }
 
 .hidden-hand-grid {
 	display: flex;
-	flex-wrap: wrap;
+	flex-wrap: nowrap;
 }
 
+/* Card backs carry the white margin and lattice a real deck has. */
 .hidden-hand {
-	width: 34px;
-	height: 48px;
-	border-radius: 6px;
+	flex: none;
+	width: var(--card-w);
+	height: var(--card-h);
+	border-radius: 5px;
 	background:
-		linear-gradient(45deg, transparent 40%, rgba(255, 255, 255, 0.18) 40% 60%, transparent 60%),
-		#315f4c;
-	border: 1px solid rgba(255, 255, 255, 0.18);
+		repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.10) 0 3px, transparent 3px 7px),
+		repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.10) 0 3px, transparent 3px 7px),
+		linear-gradient(158deg, #7d1a24, #4f1018);
+	border: 0;
+	box-shadow:
+		inset 0 0 0 2px var(--card-face),
+		inset 0 0 0 3px rgba(0, 0, 0, 0.32),
+		0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.hidden-hand + .hidden-hand {
+	margin-left: calc(var(--card-w) * -0.52);
 }
 
 .card-button {
-	width: 42px;
-	height: 58px;
-	padding: 5px 4px;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	background: #fffaf1;
-	color: #171717;
-	font-size: 28px;
-	border-color: rgba(0, 0, 0, 0.18);
-	font-weight: 800;
-	line-height: 1;
-	transition: transform 120ms ease, border-color 120ms ease;
+	position: relative;
+	flex: none;
+	width: var(--card-w);
+	height: var(--card-h);
+	padding: 0;
+	border: 0;
+	border-radius: 5px;
+	background: linear-gradient(158deg, #ffffff 0%, var(--card-face) 55%, #efeade 100%);
+	color: var(--ink);
+	box-shadow:
+		inset 0 0 0 1px rgba(0, 0, 0, 0.22),
+		0 1px 2px rgba(0, 0, 0, 0.38),
+		0 6px 14px -8px rgba(0, 0, 0, 0.6);
+	transition: transform 130ms cubic-bezier(0.2, 0.8, 0.3, 1), box-shadow 130ms ease;
+}
+
+.card-button + .card-button {
+	margin-left: calc(var(--card-w) * -0.52);
 }
 
 .card-face {
-	display: inline-flex;
+	position: absolute;
+	inset: 0;
+}
+
+.card-index {
+	position: absolute;
+	top: 3px;
+	left: 4px;
+	display: flex;
+	flex-direction: column;
 	align-items: center;
-	justify-content: center;
-	gap: 1px;
-	line-height: 0.9;
-	white-space: nowrap;
+	line-height: 0.94;
 }
 
 .card-rank {
-	font-size: 0.78em;
+	font-family: var(--face-card);
+	font-size: 16px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
 }
 
 .card-rank.ten-rank {
-	font-size: 0.5em;
+	font-size: 13px;
+	letter-spacing: -0.08em;
 }
 
 .card-suit {
-	font-size: 1em;
+	font-size: 11px;
+	line-height: 1;
 }
 
-.card-button.red {
-	color: #b72838;
+.card-pip {
+	position: absolute;
+	right: 4px;
+	bottom: 2px;
+	font-size: 23px;
+	line-height: 1;
+	opacity: 0.9;
+}
+
+/* Cards you may legally play stand ready; the rest lie flat and quiet. */
+.card-button:disabled {
+	cursor: default;
+	opacity: 1;
+}
+
+.card-button.barred {
+	filter: saturate(0.42) brightness(0.74);
 }
 
 .card-button.legal {
-	border-color: rgba(245, 201, 106, 0.86);
-	box-shadow: inset 0 -5px 0 #f5c96a, 0 0 0 1px rgba(245, 201, 106, 0.25);
+	cursor: pointer;
+}
+
+.card-button:not(:disabled):hover,
+.card-button:not(:disabled):focus-visible {
+	transform: translateY(-12px);
+	z-index: 4;
+	box-shadow:
+		inset 0 0 0 1px rgba(0, 0, 0, 0.22),
+		0 2px 3px rgba(0, 0, 0, 0.34),
+		0 14px 24px -10px rgba(0, 0, 0, 0.75);
 }
 
 .card-button.dds-best {
-	outline: 2px solid #7dd3fc;
-	outline-offset: 2px;
+	box-shadow:
+		inset 0 0 0 2px var(--gold),
+		0 1px 2px rgba(0, 0, 0, 0.38),
+		0 6px 14px -8px rgba(0, 0, 0, 0.6);
 }
 
-.card-button.small,
+.card-button.red,
+.card-button.red .card-pip {
+	color: var(--rouge);
+}
+
+/* The card on the table is the same object, laid down. */
 .played-card {
-	width: 38px;
-	height: 52px;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	flex-direction: column;
-	gap: 2px;
-	border-radius: 6px;
-	background: #fffaf1;
-	color: #171717;
-	border: 1px solid rgba(0, 0, 0, 0.18);
-	font-size: 22px;
-	font-weight: 800;
+	position: relative;
+	display: block;
+	width: var(--card-w);
+	height: var(--card-h);
+	border-radius: 5px;
+	background: linear-gradient(158deg, #ffffff 0%, var(--card-face) 55%, #efeade 100%);
+	color: var(--ink);
+	box-shadow:
+		inset 0 0 0 1px rgba(0, 0, 0, 0.2),
+		0 2px 4px rgba(0, 0, 0, 0.42),
+		0 10px 18px -10px rgba(0, 0, 0, 0.7);
+}
+
+.played-card > span {
+	position: absolute;
+	inset: 0;
 }
 
 .played-card .review-card-label {
@@ -507,22 +649,25 @@ button:not(:disabled):hover,
 	color: #7f1d1d;
 }
 
-.card-button.small.red,
 .played-card.red {
-	color: #b72838;
+	color: var(--rouge);
 }
 
+/* The centre is a well sunk into the felt, where the trick is played. */
 .center {
 	grid-area: center;
 	display: grid;
 	align-content: center;
 	justify-items: center;
-	gap: 14px;
+	gap: 12px;
 	border-radius: 50%;
 	background:
-		radial-gradient(circle at 50% 45%, rgba(68, 128, 93, 0.95), rgba(29, 78, 60, 0.92) 58%, rgba(12, 36, 28, 0.9));
-	border: 1px solid rgba(255, 255, 255, 0.18);
-	padding: 24px;
+		radial-gradient(circle at 50% 42%, rgba(11, 43, 31, 0.55), rgba(7, 30, 22, 0.68) 62%, rgba(5, 22, 16, 0.78));
+	box-shadow:
+		inset 0 3px 14px rgba(0, 0, 0, 0.55),
+		inset 0 0 0 1px rgba(201, 169, 97, 0.18),
+		0 1px 0 rgba(255, 255, 255, 0.05);
+	padding: 22px;
 	min-height: 220px;
 }
 
@@ -538,7 +683,7 @@ button:not(:disabled):hover,
 .play-summary {
 	display: grid;
 	gap: 5px;
-	max-width: min(100%, 360px);
+	max-width: min(100%, 280px);
 	border-radius: 6px;
 	background: rgba(0, 0, 0, 0.16);
 	padding: 8px 10px;
@@ -645,8 +790,178 @@ button:not(:disabled):hover,
 }
 
 .side-panel {
-	border-left: 1px solid rgba(255, 255, 255, 0.12);
+	border-left: 1px solid var(--rule);
 	padding-left: 18px;
+	/* The panel scrolls on its own so the table never moves under you. */
+	position: sticky;
+	top: 18px;
+	align-self: start;
+	max-height: calc(100vh - 36px);
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+}
+
+/* --- Sticky status head: whose turn, what contract, what group --- */
+
+.panel-head {
+	position: sticky;
+	top: 0;
+	z-index: 3;
+	flex: none;
+	margin: 0 0 12px;
+	padding: 4px 0 0;
+	/* Tinted rather than solid: the page gradient runs under it. */
+	background: rgba(16, 29, 23, 0.88);
+	backdrop-filter: blur(8px);
+	border-bottom: 1px solid var(--rule);
+}
+
+.turn-line {
+	margin: 0;
+	font-size: 21px;
+	font-weight: 700;
+	line-height: 1.15;
+	letter-spacing: -0.01em;
+	color: var(--chalk);
+}
+
+.turn-line.is-you {
+	color: var(--gold);
+}
+
+.turn-line.is-you::before {
+	content: "";
+	display: inline-block;
+	width: 9px;
+	height: 9px;
+	margin-right: 9px;
+	border-radius: 50%;
+	background: var(--gold);
+	vertical-align: 0.12em;
+	animation: turn-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes turn-pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.3; }
+}
+
+.turn-detail {
+	margin: 3px 0 0;
+	font-size: 13px;
+	color: var(--chalk-dim);
+}
+
+.head-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 14px;
+	margin: 10px 0 0;
+	font-family: var(--face-data);
+	font-size: 11.5px;
+	font-variant-numeric: tabular-nums;
+	color: var(--chalk-dim);
+}
+
+.head-meta b {
+	color: var(--chalk);
+	font-weight: 600;
+}
+
+.head-meta .vuln-on {
+	color: var(--claret);
+}
+
+/* --- Group tabs, named for where the deal actually is --- */
+
+.tabs {
+	display: flex;
+	gap: 2px;
+	margin: 12px 0 0;
+}
+
+.tab {
+	flex: 1 1 0;
+	min-width: 0;
+	border: 0;
+	border-bottom: 2px solid transparent;
+	border-radius: 4px 4px 0 0;
+	background: none;
+	padding: 8px 4px;
+	font-family: var(--face-label);
+	font-size: 12.5px;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--chalk-dim);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.tab:not(:disabled):hover {
+	background: rgba(255, 255, 255, 0.05);
+	border-color: var(--rule);
+	color: var(--chalk);
+	transform: none;
+}
+
+.tab[aria-selected="true"] {
+	border-bottom-color: var(--gold);
+	color: var(--gold);
+}
+
+.tab .tab-dot {
+	display: inline-block;
+	width: 6px;
+	height: 6px;
+	margin-left: 5px;
+	border-radius: 50%;
+	background: var(--gold);
+	vertical-align: 0.1em;
+}
+
+.panel-body {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	padding-right: 2px;
+}
+
+.panel-body > .section:last-child {
+	border-bottom: 0;
+	margin-bottom: 0;
+}
+
+.error:empty {
+	display: none;
+}
+
+/* This channel carries confirmations as well as failures, so it stays neutral. */
+.panel-head .error {
+	margin: 10px 0 0;
+	border-left: 2px solid var(--gold);
+	border-radius: 0 4px 4px 0;
+	background: rgba(255, 255, 255, 0.06);
+	padding: 7px 10px;
+	color: var(--chalk);
+	font-size: 13px;
+	line-height: 1.35;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.turn-line.is-you::before,
+	.auction-cell.awaiting {
+		animation: none;
+	}
+
+	.card-button,
+	.bid-card,
+	.bid-call,
+	.seat {
+		transition: none;
+	}
 }
 
 .deal-form {
@@ -954,55 +1269,137 @@ textarea {
 	gap: 10px;
 }
 
-.auction-summary {
-	display: grid;
-	gap: 6px;
-}
-
-.auction-summary-row {
-	display: grid;
-	grid-template-columns: minmax(98px, auto) 1fr;
-	gap: 10px;
-	align-items: center;
-	border-radius: 6px;
-	background: rgba(0, 0, 0, 0.16);
-	padding: 7px 9px;
-	color: rgba(255, 255, 255, 0.68);
-	font-size: 12px;
-}
-
-.auction-summary-row strong {
-	color: #f4f0e8;
-	text-align: right;
-}
-
-.auction-summary-row.turn-active {
-	border: 1px solid rgba(245, 201, 106, 0.62);
-	background: rgba(245, 201, 106, 0.1);
-}
-
 .auction-context {
 	display: flex;
 	justify-content: space-between;
 	gap: 8px;
-	color: rgba(255, 255, 255, 0.68);
+	margin-bottom: 10px;
+	color: var(--chalk-dim);
 	font-size: 12px;
 }
 
 .auction-context strong {
-	color: #f4f0e8;
+	color: var(--chalk);
 }
 
-.bid-controls {
+/* --- The bidding box --- */
+
+.bidding-box {
+	border-radius: 8px;
+	background: linear-gradient(180deg, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.16));
+	box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07), inset 0 2px 8px rgba(0, 0, 0, 0.3);
+	padding: 8px;
+}
+
+.bid-ladder {
 	display: grid;
-	grid-template-columns: 78px 1fr auto;
-	gap: 8px;
+	grid-template-columns: repeat(5, 1fr);
+	gap: 4px;
+}
+
+/* Each call is a small card sitting in its slot in the box. */
+.bid-card {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 1px;
+	min-height: 32px;
+	padding: 0 2px;
+	border: 0;
+	border-radius: 4px;
+	background: linear-gradient(170deg, #ffffff, var(--card-face) 60%, #efeade);
+	color: var(--ink);
+	box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.35);
+	font-family: var(--face-card);
+	font-weight: 700;
+	line-height: 1;
+	transition: transform 110ms ease, box-shadow 110ms ease;
+}
+
+.bid-card.red {
+	color: var(--rouge);
+}
+
+.bid-level {
+	font-size: 15px;
+	letter-spacing: -0.04em;
+}
+
+.bid-strain {
+	font-size: 15px;
+}
+
+.bid-card.notrump .bid-strain {
+	font-size: 11.5px;
+	font-weight: 800;
+	letter-spacing: -0.02em;
+}
+
+.bid-card:not(:disabled):hover,
+.bid-card:not(:disabled):focus-visible {
+	transform: translateY(-2px);
+	box-shadow:
+		inset 0 0 0 1px rgba(0, 0, 0, 0.2),
+		inset 0 0 0 2px var(--gold),
+		0 4px 9px -3px rgba(0, 0, 0, 0.6);
+}
+
+/* Calls already passed by stay in the box, dimmed, not removed — you can
+   still see the whole ladder and where the auction has got to. */
+.bid-card:disabled {
+	background: rgba(255, 255, 255, 0.05);
+	box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+	color: rgba(242, 237, 225, 0.26);
+	opacity: 1;
+}
+
+.bid-card.red:disabled {
+	color: rgba(200, 16, 46, 0.32);
 }
 
 .call-buttons {
 	display: grid;
-	grid-template-columns: repeat(3, 1fr);
-	gap: 8px;
+	grid-template-columns: 2fr 1fr 1fr;
+	gap: 4px;
+	margin-top: 6px;
+}
+
+.bid-call {
+	min-height: 34px;
+	border: 0;
+	border-radius: 4px;
+	font-family: var(--face-card);
+	font-size: 14px;
+	font-weight: 700;
+	letter-spacing: 0.02em;
+	color: var(--card-face);
+	box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.35);
+	transition: transform 110ms ease, filter 110ms ease;
+}
+
+.bid-call-pass {
+	background: linear-gradient(170deg, #2f7d4f, #1d5a37);
+}
+
+.bid-call-double {
+	background: linear-gradient(170deg, #c02436, #8d1626);
+}
+
+.bid-call-redouble {
+	background: linear-gradient(170deg, #2f62b0, #1d4380);
+}
+
+.bid-call:not(:disabled):hover,
+.bid-call:not(:disabled):focus-visible {
+	transform: translateY(-2px);
+	filter: brightness(1.15);
+}
+
+.bid-call:disabled {
+	background: rgba(255, 255, 255, 0.05);
+	box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+	color: rgba(242, 237, 225, 0.26);
+	opacity: 1;
 }
 
 .history-list {
@@ -1047,17 +1444,16 @@ textarea {
 	background: rgba(245, 201, 106, 0.12);
 }
 
-.auction-call-row {
-	display: grid;
-	grid-template-columns: 36px minmax(48px, auto) 1fr auto;
-}
-
 .latest-alert-panel {
 	display: grid;
 	gap: 8px;
 	border-radius: 6px;
 	background: rgba(0, 0, 0, 0.14);
 	padding: 8px 9px;
+}
+
+.latest-alert-panel:empty {
+	display: none;
 }
 
 .latest-alert-panel p {
@@ -1068,16 +1464,6 @@ textarea {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-}
-
-.auction-call-row button {
-	min-height: 28px;
-	padding: 0 9px;
-	font-size: 12px;
-}
-
-.auction-call-row.alerted-call {
-	border-left: 3px solid #7dd3fc;
 }
 
 .auction-alert {
@@ -1212,6 +1598,21 @@ textarea {
 	.side-panel {
 		border-left: 0;
 		padding-left: 0;
+		/* Stacked layout: the page scrolls as one, so release the panel. */
+		position: static;
+		max-height: none;
+		display: block;
+		/* Whose turn it is and the controls come before the cards, not after
+		   four stacked hands. The head stays stuck as you scroll to them. */
+		order: -1;
+	}
+
+	.panel-head {
+		padding-top: 8px;
+	}
+
+	.panel-body {
+		overflow-y: visible;
 	}
 
 	.table {
@@ -1229,4 +1630,222 @@ textarea {
 	.center {
 		border-radius: 8px;
 	}
+}
+
+/* --- Auction record, in standard bridge notation --- */
+
+.auction-grid {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 3px;
+	/* A bidding record is a narrow column of calls, not a banner. */
+	max-width: 340px;
+}
+
+.auction-col {
+	padding: 3px 0 5px;
+	font-family: var(--face-label);
+	font-size: 11.5px;
+	font-weight: 600;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	text-align: center;
+	color: var(--chalk-dim);
+	border-bottom: 1px solid var(--rule);
+}
+
+.auction-col.dealer-col {
+	color: var(--gold);
+}
+
+.auction-cell {
+	position: relative;
+	min-height: 28px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 1px;
+	border: 0;
+	border-radius: 4px;
+	background: rgba(255, 255, 255, 0.05);
+	color: var(--chalk);
+	font-family: var(--face-card);
+	font-size: 13.5px;
+	font-weight: 700;
+	line-height: 1;
+}
+
+.auction-cell.red {
+	color: #ff8b93;
+}
+
+.auction-cell.blank,
+.auction-cell.awaiting {
+	background: none;
+	color: rgba(242, 237, 225, 0.28);
+	cursor: default;
+}
+
+.auction-cell.awaiting {
+	color: var(--gold);
+	animation: turn-pulse 2.4s ease-in-out infinite;
+}
+
+.auction-cell.latest {
+	box-shadow: inset 0 0 0 1px rgba(245, 201, 106, 0.55);
+}
+
+.auction-cell.chosen {
+	background: rgba(245, 201, 106, 0.16);
+	box-shadow: inset 0 0 0 1px var(--gold);
+}
+
+button.auction-cell:not(:disabled):hover {
+	background: rgba(255, 255, 255, 0.12);
+	transform: none;
+}
+
+.alert-dot {
+	font-size: 7px;
+	line-height: 1;
+	color: var(--gold);
+	align-self: flex-start;
+	margin-top: 4px;
+}
+
+.auction-detail {
+	max-width: 340px;
+	margin-top: 10px;
+	border-radius: 6px;
+	background: rgba(0, 0, 0, 0.2);
+	padding: 8px 10px;
+}
+
+.auction-detail-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.auction-detail-head strong {
+	flex: 1 1 auto;
+	font-family: var(--face-card);
+	font-size: 15px;
+}
+
+.auction-detail p {
+	margin: 6px 0 0;
+	font-size: 12px;
+	line-height: 1.4;
+}
+
+.auction-hint {
+	margin: 8px 0 0;
+	font-size: 12px;
+}
+
+/* --- Trick counter --- */
+
+.trick-counter {
+	display: grid;
+	gap: 8px;
+	margin-bottom: 10px;
+}
+
+.trick-scores {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 6px;
+}
+
+.trick-score {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	align-items: baseline;
+	gap: 2px 8px;
+	border-radius: 6px;
+	background: rgba(0, 0, 0, 0.22);
+	box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+	padding: 7px 9px;
+}
+
+.trick-score.declaring {
+	background: rgba(245, 201, 106, 0.1);
+	box-shadow: inset 0 0 0 1px rgba(245, 201, 106, 0.32);
+}
+
+.trick-score-label {
+	font-family: var(--face-label);
+	font-size: 11px;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--chalk-dim);
+}
+
+.trick-score strong {
+	font-family: var(--face-card);
+	font-size: 22px;
+	font-weight: 700;
+	line-height: 1;
+	font-variant-numeric: tabular-nums;
+}
+
+.trick-score.declaring strong {
+	color: var(--gold);
+}
+
+.trick-need {
+	grid-column: 1 / -1;
+	font-size: 11px;
+	color: var(--chalk-dim);
+}
+
+.trick-ladder {
+	display: grid;
+	grid-template-columns: repeat(13, 1fr);
+	gap: 2px;
+}
+
+.trick-pip {
+	min-height: 20px;
+	border: 0;
+	border-radius: 3px;
+	background: rgba(255, 255, 255, 0.06);
+	color: rgba(242, 237, 225, 0.3);
+	font-family: var(--face-data);
+	font-size: 10px;
+	font-variant-numeric: tabular-nums;
+	padding: 0;
+}
+
+.trick-pip.won-ns {
+	background: rgba(93, 178, 132, 0.62);
+	color: #06170f;
+	font-weight: 700;
+}
+
+.trick-pip.won-ew {
+	background: rgba(200, 16, 46, 0.55);
+	color: #fff1f0;
+	font-weight: 700;
+}
+
+.trick-pip.reviewing {
+	box-shadow: inset 0 0 0 2px var(--gold);
+}
+
+.trick-pip:disabled {
+	opacity: 1;
+}
+
+button.trick-pip:not(:disabled):hover {
+	transform: none;
+	filter: brightness(1.2);
+}
+
+.auction-summary-note {
+	font-family: var(--face-data);
+	font-size: 11.5px;
+	white-space: nowrap;
 }
