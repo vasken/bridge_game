@@ -1,0 +1,22 @@
+{
+	"name": "bridge-core",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"dev": "vite --host 127.0.0.1",
+		"dev:multi": "npm run build && node server.mjs",
+		"postinstall": "node scripts/patch-bridge-dds.mjs",
+		"test": "vitest run",
+		"test:watch": "vitest"
+	},
+	"devDependencies": {
+		"@types/emscripten": "^1.41.5",
+		"typescript": "^5.7.2",
+		"vitest": "^2.1.8"
+	},
+	"dependencies": {
+		"bridge-dds": "^1.4.0"
+	}
+}
